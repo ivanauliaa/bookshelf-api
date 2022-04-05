@@ -1,7 +1,8 @@
 const { nanoid } = require('nanoid');
-const books = require('./books');
+const { DB_COLLECTION, DB_NAME } = require('../constants/contants');
+const getClient = require('../database/connection');
 
-const addBooksHandler = (request, h) => {
+const addBooksHandler = async (request, h) => {
   const {
     name,
     year,
@@ -38,8 +39,11 @@ const addBooksHandler = (request, h) => {
   const insertedAt = new Date().toISOString();
   const updatedAt = insertedAt;
 
-  books.push({
-    id,
+  const client = getClient();
+  await client.connect();
+
+  const book = await client.db(DB_NAME).collection(DB_COLLECTION).insertOne({
+    _id: id,
     name,
     year,
     author,
@@ -53,33 +57,30 @@ const addBooksHandler = (request, h) => {
     updatedAt,
   });
 
-  const isSuccess = books.filter((book) => book.id === id).length > 0;
-
-  if (!isSuccess) {
-    const response = h.response({
-      status: 'error',
-      message: 'Buku gagal ditambahkan',
-    });
-    response.code(500);
-
-    return response;
-  }
-
   const response = h.response({
     status: 'success',
     message: 'Buku berhasil ditambahkan',
     data: {
-      bookId: id,
+      book,
     },
   });
   response.code(201);
 
+  client.close();
+
   return response;
 };
 
-const getAllBooksHandler = (request, h) => {
-  let filteredBooks = books;
+const getAllBooksHandler = async (request, h) => {
   const { name, reading, finished } = request.query;
+
+  const client = getClient();
+  await client.connect();
+
+  let filteredBooks = await client.db(DB_NAME)
+    .collection(DB_COLLECTION)
+    .find({})
+    .toArray();
 
   if (name !== undefined) {
     if (name !== '') {
@@ -111,7 +112,7 @@ const getAllBooksHandler = (request, h) => {
     status: 'success',
     data: {
       books: filteredBooks.map((book) => ({
-        id: book.id,
+        _id: book._id,
         name: book.name,
         publisher: book.publisher,
       })),
@@ -122,11 +123,15 @@ const getAllBooksHandler = (request, h) => {
   return response;
 };
 
-const getBookByIdHandler = (request, h) => {
+const getBookByIdHandler = async (request, h) => {
   const { id } = request.params;
-  const selectedBook = books.filter((book) => book.id === id)[0];
 
-  if (selectedBook === undefined) {
+  const client = getClient();
+  await client.connect();
+
+  const selectedBook = await client.db(DB_NAME).collection(DB_COLLECTION).findOne({ _id: id });
+
+  if (!selectedBook) {
     const response = h.response({
       status: 'fail',
       message: 'Buku tidak ditemukan',
@@ -147,19 +152,8 @@ const getBookByIdHandler = (request, h) => {
   return response;
 };
 
-const editBookByIdHandler = (request, h) => {
+const editBookByIdHandler = async (request, h) => {
   const { id } = request.params;
-  const index = books.findIndex((book) => book.id === id);
-
-  if (index === -1) {
-    const response = h.response({
-      status: 'fail',
-      message: 'Gagal memperbarui buku. Id tidak ditemukan',
-    });
-    response.code(404);
-
-    return response;
-  }
 
   const {
     name,
@@ -193,18 +187,33 @@ const editBookByIdHandler = (request, h) => {
     return response;
   }
 
-  books[index] = {
-    ...books[index],
-    name,
-    year,
-    author,
-    summary,
-    publisher,
-    pageCount,
-    readPage,
-    reading,
-    updatedAt,
-  };
+  const client = getClient();
+  await client.connect();
+
+  const { modifiedCount } = await client.db(DB_NAME).collection(DB_COLLECTION)
+    .updateOne({ _id: id }, {
+      $set: {
+        name,
+        year,
+        author,
+        summary,
+        publisher,
+        pageCount,
+        readPage,
+        reading,
+        updatedAt,
+      },
+    });
+
+  if (modifiedCount === 0) {
+    const response = h.response({
+      status: 'fail',
+      message: 'Buku tidak ditemukan',
+    });
+    response.code(404);
+
+    return response;
+  }
 
   const response = h.response({
     status: 'success',
@@ -215,21 +224,24 @@ const editBookByIdHandler = (request, h) => {
   return response;
 };
 
-const deleteBookByIdHandler = (request, h) => {
+const deleteBookByIdHandler = async (request, h) => {
   const { id } = request.params;
-  const index = books.findIndex((book) => book.id === id);
 
-  if (index === -1) {
+  const client = getClient();
+  await client.connect();
+
+  const { deletedCount } = await client.db(DB_NAME).collection(DB_COLLECTION)
+    .deleteOne({ _id: id });
+
+  if (deletedCount === 0) {
     const response = h.response({
       status: 'fail',
-      message: 'Buku gagal dihapus. Id tidak ditemukan',
+      message: 'Buku tidak ditemukan',
     });
     response.code(404);
 
     return response;
   }
-
-  books.splice(index, 1);
 
   const response = h.response({
     status: 'success',

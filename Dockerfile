@@ -8,6 +8,6 @@ WORKDIR /app
 
 RUN npm install
 
-EXPOSE 5000
+EXPOSE 5200
 
 CMD npm run start-prod
